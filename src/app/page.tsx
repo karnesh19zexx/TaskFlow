@@ -3,13 +3,14 @@ import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { CalendarClock, FolderKanban, Users, Zap } from "lucide-react";
 import { Logo } from "@/components/logo";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 
 const FEATURES = [
   { icon: FolderKanban, title: "Projects & boards", text: "Organize work into projects with a clear Todo → In Progress → Done board." },
   { icon: Users, title: "Built for teams", text: "Invite teammates, assign tasks, and always know who owns what." },
   { icon: CalendarClock, title: "Priorities & deadlines", text: "Set priority and due dates so overdue work never slips through." },
-  { icon: Zap, title: "Real-time (coming soon)", text: "See updates from your team instantly, without refreshing." },
+  { icon: Zap, title: "Real-time collaboration", text: "See teammates' changes and who's online instantly, without refreshing." },
 ];
 
 const PREVIEW = [
@@ -26,8 +27,9 @@ export default async function LandingPage() {
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/50">
       <header className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <Logo />
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" asChild>
+        <div className="flex items-center gap-1 sm:gap-2">
+          <ThemeToggle />
+          <Button variant="ghost" className="hidden sm:inline-flex" asChild>
             <Link href="/sign-in">Sign in</Link>
           </Button>
           <Button asChild>
@@ -45,7 +47,7 @@ export default async function LandingPage() {
             TaskFlow is a clean, modern task manager for teams. Create projects, assign tasks, and keep
             everyone moving in the same direction.
           </p>
-          <div className="mt-10 flex justify-center gap-3">
+          <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
             <Button size="lg" className="h-11 px-6" asChild>
               <Link href="/sign-up">Start for free</Link>
             </Button>

@@ -6,6 +6,7 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { findUserByEmail } from "@/server/current-user";
 import { HttpError, badRequest, forbidden, notFound } from "@/server/errors";
+import { publish } from "@/server/realtime";
 import { emptyTaskCounts, toProjectDTO, type LeanProject, type LeanUser } from "@/server/serializers";
 import type { ProjectDTO, TaskCounts } from "@/types";
 
@@ -77,6 +78,7 @@ export async function createProject(userId: Types.ObjectId, input: CreateProject
 export async function updateProject(projectId: string, userId: Types.ObjectId, input: UpdateProjectInput) {
   await getOwnedProject(projectId, userId);
   await Project.updateOne({ _id: projectId }, { $set: input });
+  publish(projectId, { type: "project.updated", actorId: userId.toString() });
   return getProjectForUser(projectId, userId);
 }
 
@@ -86,6 +88,7 @@ export async function deleteProject(projectId: string, userId: Types.ObjectId) {
   // tasks left behind by a failed cleanup are unreachable and excluded from every read.
   await Project.deleteOne({ _id: projectId });
   await Task.deleteMany({ project: projectId });
+  publish(projectId, { type: "project.deleted", actorId: userId.toString() });
 }
 
 export async function addProjectMember(projectId: string, userId: Types.ObjectId, email: string) {
@@ -98,6 +101,7 @@ export async function addProjectMember(projectId: string, userId: Types.ObjectId
     throw badRequest("That user is already a member of this project");
   }
   await Project.updateOne({ _id: projectId }, { $addToSet: { members: member._id } });
+  publish(projectId, { type: "project.members_changed", actorId: userId.toString() });
   return getProjectForUser(projectId, userId);
 }
 
@@ -110,6 +114,7 @@ export async function removeProjectMember(projectId: string, userId: Types.Objec
 
   await Project.updateOne({ _id: projectId }, { $pull: { members: memberObjectId } });
   await Task.updateMany({ project: projectId, assignee: memberObjectId }, { $set: { assignee: null } });
+  publish(projectId, { type: "project.members_changed", actorId: userId.toString(), removedUserId: memberId });
   return getProjectForUser(projectId, userId);
 }
 
