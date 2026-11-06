@@ -4,7 +4,7 @@ import type { TaskStatus } from "@/lib/constants";
 import { objectIdSchema, type CreateProjectInput, type UpdateProjectInput } from "@/lib/validations";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
-import { User } from "@/models/user";
+import { findUserByEmail } from "@/server/current-user";
 import { HttpError, badRequest, forbidden, notFound } from "@/server/errors";
 import { emptyTaskCounts, toProjectDTO, type LeanProject, type LeanUser } from "@/server/serializers";
 import type { ProjectDTO, TaskCounts } from "@/types";
@@ -82,13 +82,15 @@ export async function updateProject(projectId: string, userId: Types.ObjectId, i
 
 export async function deleteProject(projectId: string, userId: Types.ObjectId) {
   await getOwnedProject(projectId, userId);
-  await Task.deleteMany({ project: projectId });
+  // Project first: once it is gone, access checks reject new task writes (see createTask), and any
+  // tasks left behind by a failed cleanup are unreachable and excluded from every read.
   await Project.deleteOne({ _id: projectId });
+  await Task.deleteMany({ project: projectId });
 }
 
 export async function addProjectMember(projectId: string, userId: Types.ObjectId, email: string) {
   const project = await getOwnedProject(projectId, userId);
-  const member = await User.findOne({ email }).select("_id").lean<{ _id: Types.ObjectId }>();
+  const member = await findUserByEmail(email);
   if (!member) {
     throw new HttpError(404, "No TaskFlow account uses that email. Ask them to sign up first.");
   }

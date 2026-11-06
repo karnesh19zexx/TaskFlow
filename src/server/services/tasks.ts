@@ -3,7 +3,7 @@ import { connectToDatabase } from "@/lib/db";
 import { objectIdSchema, type CreateTaskInput, type UpdateTaskInput } from "@/lib/validations";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
-import { badRequest, forbidden, notFound } from "@/server/errors";
+import { HttpError, badRequest, forbidden, notFound } from "@/server/errors";
 import { toTaskDTO, type LeanTask } from "@/server/serializers";
 import { getAccessibleProject, isProjectMember, isProjectOwner } from "@/server/services/projects";
 import type { AssignedTaskDTO, TaskDTO } from "@/types";
@@ -34,19 +34,32 @@ export async function listTasksForProject(projectId: string, userId: Types.Objec
   return tasks.map(toTaskDTO);
 }
 
+/**
+ * Open tasks assigned to the user, soonest due first with undated tasks last. Joining the project
+ * re-checks membership, so stale assignments in projects the user has left are never exposed.
+ */
 export async function listTasksAssignedToUser(userId: Types.ObjectId, limit = 8): Promise<AssignedTaskDTO[]> {
   await connectToDatabase();
-  const tasks = await Task.find({ assignee: userId, status: { $ne: "done" } })
+  const rows = await Task.aggregate<{ _id: Types.ObjectId; projectName: string }>([
+    { $match: { assignee: userId, status: { $ne: "done" } } },
+    { $lookup: { from: Project.collection.name, localField: "project", foreignField: "_id", as: "projectDoc" } },
+    { $unwind: "$projectDoc" },
+    { $match: { "projectDoc.members": userId } },
+    { $addFields: { noDueDate: { $cond: [{ $ifNull: ["$dueDate", false] }, 0, 1] } } },
+    { $sort: { noDueDate: 1, dueDate: 1, createdAt: -1 } },
+    { $limit: limit },
+    { $project: { _id: 1, projectName: "$projectDoc.name" } },
+  ]);
+
+  const tasks = await Task.find({ _id: { $in: rows.map((r) => r._id) } })
     .populate("assignee", USER_FIELDS)
     .populate("createdBy", USER_FIELDS)
-    .populate("project", "name")
-    .sort({ dueDate: 1, createdAt: -1 })
-    .limit(limit)
-    .lean<(Omit<LeanTask, "project"> & { project: { _id: Types.ObjectId; name: string } })[]>();
-  return tasks.map((task) => ({
-    ...toTaskDTO({ ...task, project: task.project._id }),
-    projectName: task.project.name,
-  }));
+    .lean<LeanTask[]>();
+  const byId = new Map(tasks.map((t) => [t._id.toString(), t]));
+  return rows.flatMap(({ _id, projectName }) => {
+    const task = byId.get(_id.toString());
+    return task ? [{ ...toTaskDTO(task), projectName }] : [];
+  });
 }
 
 export async function createTask(projectId: string, userId: Types.ObjectId, input: CreateTaskInput) {
@@ -63,6 +76,11 @@ export async function createTask(projectId: string, userId: Types.ObjectId, inpu
     dueDate: toDate(dueDate) ?? null,
     createdBy: userId,
   });
+  // The project may have been deleted (or the user removed) while this task was being inserted.
+  if (!(await Project.exists({ _id: project._id, members: userId }))) {
+    await Task.deleteOne({ _id: task._id });
+    throw notFound("Project");
+  }
   await touchProject(project._id);
   return toTaskDTO((await loadTask(task._id.toString()))!);
 }
@@ -79,8 +97,9 @@ async function getAccessibleTask(taskId: string, userId: Types.ObjectId) {
   try {
     const project = await getAccessibleProject(task.project.toString(), userId);
     return { task, project };
-  } catch {
-    throw notFound("Task");
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) throw notFound("Task");
+    throw error;
   }
 }
 
