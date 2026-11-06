@@ -4,6 +4,7 @@ import { objectIdSchema, type CreateTaskInput, type UpdateTaskInput } from "@/li
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { HttpError, badRequest, forbidden, notFound } from "@/server/errors";
+import { publish } from "@/server/realtime";
 import { toTaskDTO, type LeanTask } from "@/server/serializers";
 import { getAccessibleProject, isProjectMember, isProjectOwner } from "@/server/services/projects";
 import type { AssignedTaskDTO, TaskDTO } from "@/types";
@@ -82,7 +83,9 @@ export async function createTask(projectId: string, userId: Types.ObjectId, inpu
     throw notFound("Project");
   }
   await touchProject(project._id);
-  return toTaskDTO((await loadTask(task._id.toString()))!);
+  const created = toTaskDTO((await loadTask(task._id.toString()))!);
+  publish(created.projectId, { type: "task.created", actorId: userId.toString(), task: created });
+  return created;
 }
 
 async function getAccessibleTask(taskId: string, userId: Types.ObjectId) {
@@ -116,7 +119,9 @@ export async function updateTask(taskId: string, userId: Types.ObjectId, input: 
 
   await Task.updateOne({ _id: taskId }, { $set: update }, { runValidators: true });
   await touchProject(project._id);
-  return toTaskDTO((await loadTask(taskId))!);
+  const updated = toTaskDTO((await loadTask(taskId))!);
+  publish(updated.projectId, { type: "task.updated", actorId: userId.toString(), task: updated });
+  return updated;
 }
 
 /** Members can edit any task; only the task creator or the project owner can delete it. */
@@ -127,4 +132,5 @@ export async function deleteTask(taskId: string, userId: Types.ObjectId) {
   }
   await Task.deleteOne({ _id: taskId });
   await touchProject(project._id);
+  publish(project._id.toString(), { type: "task.deleted", actorId: userId.toString(), taskId });
 }
